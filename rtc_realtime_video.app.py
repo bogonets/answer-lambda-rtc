@@ -15,11 +15,11 @@ from queue import Full, Empty
 
 import numpy as np
 
+from av import VideoFrame
 from aiohttp import web
 import aiohttp_cors
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from aiortc.contrib.media import MediaPlayer
-from av import VideoFrame
 
 
 ROOT_DIR = os.path.dirname(__file__)
@@ -38,6 +38,8 @@ consumer_queue: Queue
 producer_password = '0000'
 consumer_password = '0000'
 peer_connections = set()
+empty_img = np.zeros((300, 300, 3), dtype=np.uint8)
+last_frame = VideoFrame.from_ndarray(empty_img, format="bgr24")
 
 
 class VideoImageTrack(VideoStreamTrack):
@@ -47,8 +49,6 @@ class VideoImageTrack(VideoStreamTrack):
 
     def __init__(self, queue):
         super().__init__()  # don't forget this!
-        self.empty_img = np.zeros((300, 300, 3), dtype=np.int8)
-        self.last_img = self.empty_img
         self.queue = queue
 
     async def recv(self):
@@ -56,14 +56,22 @@ class VideoImageTrack(VideoStreamTrack):
 
         try:
             img = self.queue.get_nowait()
-            self.last_img = img
         except Empty:
-            img = self.last_img
+            img = None
 
-        # Create video frame
-        frame = VideoFrame.from_ndarray(img, format="bgr24")
+        global last_frame
+        if img is not None:
+            try:
+                frame = VideoFrame.from_ndarray(img, format="bgr24")
+            except:
+                frame = last_frame
+        else:
+            frame = last_frame
+
         frame.pts = pts
         frame.time_base = time_base
+        last_frame = frame
+
         return frame
 
 
