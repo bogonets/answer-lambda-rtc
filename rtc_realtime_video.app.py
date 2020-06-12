@@ -16,6 +16,7 @@ from queue import Full, Empty
 import numpy as np
 
 from aiohttp import web
+import aiohttp_cors
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from aiortc.contrib.media import MediaPlayer
 from av import VideoFrame
@@ -30,6 +31,7 @@ port = 8888
 max_queue_size = 4
 
 app: web.Application
+cors: aiohttp_cors.CorsConfig
 rtc_process: Process
 producer_queue: Queue
 consumer_queue: Queue
@@ -53,40 +55,41 @@ class VideoImageTrack(VideoStreamTrack):
         pts, time_base = await self.next_timestamp()
 
         try:
-            self.last_img = self.queue.get_nowait()
+            img = self.queue.get_nowait()
+            self.last_img = img
         except Empty:
-            pass
+            img = self.last_img
 
         # Create video frame
-        frame = VideoFrame.from_ndarray(self.last_img, format="bgr24")
+        frame = VideoFrame.from_ndarray(img, format="bgr24")
         frame.pts = pts
         frame.time_base = time_base
         return frame
 
 
 async def on_exit_process_background():
-    global app
-    await app.shutdown()
-    await app.cleanup()
+    # global app
+    # await app.shutdown()
+    # await app.cleanup()
     raise web.GracefulExit()
 
 
-async def exit_signal(request):
+async def on_exit_signal(request):
     data = await request.post()
     pwd = data['@pwd']
     asyncio.create_task(on_exit_process_background())
     return web.Response(content_type="text/html", text='')
 
 
-async def index(request):
+async def on_index_html(request):
     return web.Response(content_type="text/html", text=INDEX_HTML_CONTENT)
 
 
-async def javascript(request):
+async def on_client_js(request):
     return web.Response(content_type="application/javascript", text=CLIENT_JS_CONTENT)
 
 
-async def offer(request):
+async def on_offer(request):
     params = await request.json()
     offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
 
@@ -157,10 +160,21 @@ def start_app(http_host, http_port, ipc_queue, verbose=False, cert_file=None, ke
     app = web.Application()
     app.on_shutdown.append(on_shutdown)
     app.on_cleanup.append(on_cleanup)
-    app.router.add_get("/", index)
-    app.router.add_get("/client.js", javascript)
-    app.router.add_post("/offer", offer)
-    app.router.add_post("/__exit_signal__", exit_signal)
+    app.router.add_get("/", on_index_html)
+    app.router.add_get("/client.js", on_client_js)
+    app.router.add_post("/offer", on_offer)
+    app.router.add_post("/__exit_signal__", on_exit_signal)
+
+    global cors
+    cors = aiohttp_cors.setup(app, defaults={
+        "*": aiohttp_cors.ResourceOptions(
+            allow_credentials=True,
+            expose_headers="*",
+            allow_headers="*",
+        )
+    })
+    for route in list(app.router.routes()):
+        cors.add(route)
 
     web.run_app(app, host=http_host, port=http_port, ssl_context=ssl_context)
 

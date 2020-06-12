@@ -12,6 +12,7 @@
             {"type": "pip", "src": "numpy"},
             {"type": "pip", "src": "av"},
             {"type": "pip", "src": "aiohttp"},
+            {"type": "pip", "src": "aiohttp_cors"},
             {"type": "pip", "src": "aiortc"}
         ],
         "engines": ">=1.1.3",
