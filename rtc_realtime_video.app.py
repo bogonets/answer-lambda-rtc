@@ -227,7 +227,7 @@ def on_get(key):
 
 def on_init():
     global producer_password
-    producer_password = ''.join(random.choices(string.ascii_letters + string.digits, PASSWORD_LENGTH))
+    producer_password = ''.join(random.choices(string.ascii_letters + string.digits, k=PASSWORD_LENGTH))
 
     global producer_queue
     global max_queue_size
