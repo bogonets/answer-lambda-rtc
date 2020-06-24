@@ -34,10 +34,12 @@ EXIT_SIGNAL_PATH = '/__exit_signal__'
 PASSWORD_PARAM_KEY = '@password'
 PASSWORD_LENGTH = 256
 DEFAULT_MAX_QUEUE_SIZE = 4
+DEFAULT_EXIT_TIMEOUT_SECONDS = 4.0
 
 host = '0.0.0.0'
 port = 8888
 max_queue_size = DEFAULT_MAX_QUEUE_SIZE
+exit_timeout_seconds = DEFAULT_EXIT_TIMEOUT_SECONDS
 
 app: web.Application
 cors: aiohttp_cors.CorsConfig
@@ -214,6 +216,9 @@ def on_set(key, val):
     elif key == 'max_queue_size':
         global max_queue_size
         max_queue_size = int(val)
+    elif key == 'exit_timeout_seconds':
+        global exit_timeout_seconds
+        exit_timeout_seconds = float(val)
 
 
 def on_get(key):
@@ -223,6 +228,8 @@ def on_get(key):
         return port
     elif key == 'max_queue_size':
         return max_queue_size
+    elif key == 'exit_timeout_seconds':
+        return exit_timeout_seconds
 
 
 def on_init():
@@ -263,7 +270,14 @@ def on_destroy():
     conn = http.client.HTTPConnection(f'{host}:{port}')
     conn.request('POST', EXIT_SIGNAL_PATH, params, headers)
 
-    rtc_process.join()
+    global exit_timeout_seconds
+    timeout = exit_timeout_seconds if exit_timeout_seconds > 0.0 else DEFAULT_EXIT_TIMEOUT_SECONDS
+
+    rtc_process.join(timeout=timeout)
+
+    # A negative value -N indicates that the child was terminated by signal N.
+    if rtc_process.exitcode < 0:
+        rtc_process.kill()
     return True
 
 
