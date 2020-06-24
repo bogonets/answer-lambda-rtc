@@ -273,11 +273,16 @@ def on_destroy():
     global exit_timeout_seconds
     timeout = exit_timeout_seconds if exit_timeout_seconds > 0.0 else DEFAULT_EXIT_TIMEOUT_SECONDS
 
+    logging.info('Join({}s) the RTC process.', timeout)
     rtc_process.join(timeout=timeout)
 
-    # A negative value -N indicates that the child was terminated by signal N.
-    if rtc_process.exitcode < 0:
+    if rtc_process.is_alive():
+        logging.warning('Kill the RTC process.')
         rtc_process.kill()
+
+    # A negative value -N indicates that the child was terminated by signal N.
+    logging.info('The exit code of RTC process is {}.', rtc_process.exitcode)
+
     return True
 
 
