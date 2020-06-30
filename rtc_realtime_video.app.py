@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import platform
 import ssl
 import string
@@ -83,9 +84,9 @@ class VideoImageTrack(VideoStreamTrack):
 
 
 async def on_exit_process_background():
-    # global app
-    # await app.shutdown()
-    # await app.cleanup()
+    global app
+    await app.shutdown()
+    await app.cleanup()
     raise web.GracefulExit()
 
 
@@ -244,6 +245,9 @@ def on_init():
     rtc_process = Process(target=start_app, args=(host, port, producer_queue, producer_password,))
     rtc_process.start()
 
+    sys.stderr.write(f'RTC process PID is {rtc_process.pid}.')
+    sys.stderr.flush()
+
     return rtc_process.is_alive()
 
 
@@ -273,15 +277,32 @@ def on_destroy():
     global exit_timeout_seconds
     timeout = exit_timeout_seconds if exit_timeout_seconds > 0.0 else DEFAULT_EXIT_TIMEOUT_SECONDS
 
-    logging.info('Join({}s) the RTC process.', timeout)
+    # logging.info('Join({}s) the RTC process.', timeout)
+    sys.stderr.write(f'Join({timeout}s) the RTC process.')
+    sys.stderr.flush()
+
     rtc_process.join(timeout=timeout)
 
     if rtc_process.is_alive():
-        logging.warning('Kill the RTC process.')
+        # logging.warning('Terminate the RTC process.')
+        sys.stderr.write('Terminate the RTC process.')
+        sys.stderr.flush()
+
         rtc_process.kill()
 
     # A negative value -N indicates that the child was terminated by signal N.
-    logging.info('The exit code of RTC process is {}.', rtc_process.exitcode)
+    # logging.info('The exit code of RTC process is {}.', rtc_process.exitcode)
+    sys.stderr.write(f'The exit code of RTC process is {rtc_process.exitcode}.')
+    sys.stderr.flush()
+
+    rtc_process.close()
+
+    sys.stderr.write('rtc_process closed.')
+    sys.stderr.flush()
+
+    global producer_queue
+    producer_queue.close()
+    producer_queue.join_thread()
 
     return True
 
