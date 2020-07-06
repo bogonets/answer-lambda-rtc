@@ -1,0 +1,4 @@
+.idea/
+.opvim/
+__pycache__/
+.DS_Store
