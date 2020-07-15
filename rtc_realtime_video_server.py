@@ -4,13 +4,15 @@ import os
 import sys
 import string
 import random
+import ssl
 import numpy as np
 
 import importlib
 from queue import Empty
 
+from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
-
+from pygments.lexer import inherit
 
 ROOT_DIR = os.path.dirname(__file__)
 INDEX_HTML_CONTENT = open(os.path.join(ROOT_DIR, 'index.html'), 'r').read()
@@ -23,15 +25,16 @@ PASSWORD_PARAM_KEY = '@password'
 PASSWORD_LENGTH = 256
 EMPTY_IMAGE = np.zeros((300, 300, 3), dtype=np.uint8)
 DEFAULT_FRAME_FORMAT = 'bgr24'
+LOGGING_PREFIX = '[rtc.realtime_video.server] '
 
 
 def print_out(message):
-    sys.stdout.write(message)
+    sys.stdout.write(LOGGING_PREFIX + message)
     sys.stdout.flush()
 
 
 def print_error(message):
-    sys.stderr.write(message)
+    sys.stderr.write(LOGGING_PREFIX + message)
     sys.stderr.flush()
 
 
@@ -92,158 +95,171 @@ class VideoImageTrack(VideoStreamTrack):
         return frame
 
 
-class RealTimeVideoServer:
-    """
-    """
-
-    def __init__(self,
-                 rtc_queue,
-                 rtc_password,
-                 host: str,
-                 port: int,
-                 verbose=False,
-                 cert_file=None,
-                 key_file=None):
-        pass
-
-
-from aiohttp import web
 import aiohttp_cors
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from multiprocessing import Queue
 import asyncio
 import logging
 import json
-import ssl
-
-app: web.Application
-cors: aiohttp_cors.CorsConfig
-consumer_queue: Queue
-consumer_password = ''
-peer_connections = set()
-
-async def on_exit_process_background():
-    global app
-    await app.shutdown()
-    await app.cleanup()
-    raise web.GracefulExit()
 
 
-async def on_exit_signal(request):
-    data = await request.post()
-    password = data[PASSWORD_PARAM_KEY]
-    global consumer_password
-    if consumer_password == password:
-        asyncio.create_task(on_exit_process_background())
-    return web.Response(content_type='text/html', text='')
+class RealTimeVideoServer:
+    """
+    """
 
+    def __init__(self,
+                 mp_queue,
+                 exit_password,
+                 host: str,
+                 port: int,
+                 cert_file=None,
+                 key_file=None,
+                 verbose=False):
+        self.mp_queue = mp_queue
+        self.exit_password = exit_password
+        self.host = host
+        self.port = port
+        self.cert_file = cert_file
+        self.key_file = key_file
+        self.verbose = verbose
 
-async def on_index_html(request):
-    return web.Response(content_type='text/html', text=INDEX_HTML_CONTENT)
+        if self.verbose:
+            logging.basicConfig(level=logging.DEBUG)
 
+        if self.cert_file and self.key_file:
+            self.ssl_context = ssl.SSLContext()
+            self.ssl_context.load_cert_chain(self.cert_file, self.key_file)
+        else:
+            self.ssl_context = None
 
-async def on_client_js(request):
-    return web.Response(content_type='application/javascript', text=CLIENT_JS_CONTENT)
+        self.app = web.Application()
+        self.app.on_shutdown.append(self.on_shutdown)
+        self.app.on_cleanup.append(self.on_cleanup)
+        self.app.router.add_get(INDEX_HTML_PATH, self.on_index_html)
+        self.app.router.add_get(CLIENT_JS_PATH, self.on_client_js)
+        self.app.router.add_post(OFFER_PATH, self.on_offer)
+        self.app.router.add_post(EXIT_SIGNAL_PATH, self.on_exit_signal)
 
+        self.cors = aiohttp_cors.setup(self.app, defaults={
+            '*': aiohttp_cors.ResourceOptions(
+                allow_credentials=True,
+                expose_headers='*',
+                allow_headers='*',
+            )
+        })
+        for route in list(self.app.router.routes()):
+            self.cors.add(route)
 
-async def on_offer(request):
-    params = await request.json()
-    offer = RTCSessionDescription(sdp=params['sdp'], type=params['type'])
+        self.peer_connections = set()
 
-    pc = RTCPeerConnection()
-    peer_connections.add(pc)
+        print_out(f'RealTimeVideoServer() OK.')
 
-    @pc.on('iceconnectionstatechange')
-    async def on_iceconnectionstatechange():
-        logging.info('ICE connection state is {}', pc.iceConnectionState)
-        if pc.iceConnectionState == 'failed':
-            await pc.close()
-            peer_connections.discard(pc)
+    async def on_exit_process_background(self):
+        await self.app.shutdown()
+        await self.app.cleanup()
+        raise web.GracefulExit()
 
-    # open media source
-    # if args.play_from:
-    #     player = MediaPlayer(args.play_from)
-    # else:
-    #     options = {'framerate': '30', 'video_size': '640x480'}
-    #     if platform.system() == 'Darwin':
-    #         player = MediaPlayer('default:none', format='avfoundation', options=options)
-    #     else:
-    #         player = MediaPlayer('/dev/video0', format='v4l2', options=options)
+    async def on_exit_signal(self, request):
+        print_out(f'RealTimeVideoServer.on_exit_signal(remote={request.remote})')
+        data = await request.post()
+        password = data[PASSWORD_PARAM_KEY]
+        if self.exit_password == password:
+            asyncio.create_task(self.on_exit_process_background())
+            return web.Response()
+        else:
+            return web.Response(status=400)
 
-    await pc.setRemoteDescription(offer)
-    for t in pc.getTransceivers():
-        if t.kind == 'video':
-            global consumer_queue
-            pc.addTrack(VideoImageTrack(consumer_queue))
-        elif t.kind == 'audio':
-            pass
+    async def on_index_html(self, request):
+        print_out(f'RealTimeVideoServer.on_index_html(remote={request.remote})')
+        return web.Response(content_type='text/html', text=INDEX_HTML_CONTENT)
 
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
+    async def on_client_js(self, request):
+        print_out(f'RealTimeVideoServer.on_client_js(remote={request.remote})')
+        return web.Response(content_type='application/javascript', text=CLIENT_JS_CONTENT)
 
-    return web.Response(
-        content_type='application/json',
-        text=json.dumps(
-            {'sdp': pc.localDescription.sdp, 'type': pc.localDescription.type}
-        ),
-    )
+    async def on_offer(self, request):
+        print_out(f'RealTimeVideoServer.on_offer(remote={request.remote})')
 
+        params = await request.json()
+        offer = RTCSessionDescription(sdp=params['sdp'], type=params['type'])
 
-async def on_shutdown(app):
-    # close peer connections
-    coros = [pc.close() for pc in peer_connections]
-    await asyncio.gather(*coros)
-    peer_connections.clear()
+        pc = RTCPeerConnection()
+        self.peer_connections.add(pc)
 
+        @pc.on('iceconnectionstatechange')
+        async def on_ice_connection_state_change():
+            print_out(f'on_ice_connection_state_change({pc.iceConnectionState})')
+            if pc.iceConnectionState == 'failed':
+                await pc.close()
+                self.peer_connections.discard(pc)
 
-async def on_cleanup(app):
-    pass
+        # open media source
+        # if args.play_from:
+        #     player = MediaPlayer(args.play_from)
+        # else:
+        #     options = {'framerate': '30', 'video_size': '640x480'}
+        #     if platform.system() == 'Darwin':
+        #         player = MediaPlayer('default:none', format='avfoundation', options=options)
+        #     else:
+        #         player = MediaPlayer('/dev/video0', format='v4l2', options=options)
 
+        await pc.setRemoteDescription(offer)
 
-def start_app(http_host, http_port, ipc_queue, password, verbose=False, cert_file=None, key_file=None):
-    if verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        for t in pc.getTransceivers():
+            if t.kind == 'video':
+                pc.addTrack(VideoImageTrack(self.mp_queue))
+            elif t.kind == 'audio':
+                pass
 
-    if cert_file and key_file:
-        ssl_context = ssl.SSLContext()
-        ssl_context.load_cert_chain(cert_file, key_file)
-    else:
-        ssl_context = None
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
 
-    global consumer_queue
-    consumer_queue = ipc_queue
-
-    global consumer_password
-    consumer_password = password
-
-    logging.info('start_app(host={},port={},password={},verbose={})',
-                 http_host, http_port, password, verbose)
-
-    global app
-    app = web.Application()
-    app.on_shutdown.append(on_shutdown)
-    app.on_cleanup.append(on_cleanup)
-    app.router.add_get(INDEX_HTML_PATH, on_index_html)
-    app.router.add_get(CLIENT_JS_PATH, on_client_js)
-    app.router.add_post(OFFER_PATH, on_offer)
-    app.router.add_post(EXIT_SIGNAL_PATH, on_exit_signal)
-
-    global cors
-    cors = aiohttp_cors.setup(app, defaults={
-        '*': aiohttp_cors.ResourceOptions(
-            allow_credentials=True,
-            expose_headers='*',
-            allow_headers='*',
+        return web.Response(
+            content_type='application/json',
+            text=json.dumps(
+                {
+                    'sdp': pc.localDescription.sdp,
+                    'type': pc.localDescription.type
+                }
+            ),
         )
-    })
-    for route in list(app.router.routes()):
-        cors.add(route)
 
-    web.run_app(app,
-                host=http_host,
-                port=http_port,
-                ssl_context=ssl_context,
-                handle_signals=False)
+    async def on_shutdown(self, app):
+        # close peer connections
+        coros = [pc.close() for pc in self.peer_connections]
+        await asyncio.gather(*coros)
+        self.peer_connections.clear()
+
+    async def on_cleanup(self, app):
+        pass
+
+    def run(self):
+        web.run_app(self.app,
+                    host=self.host,
+                    port=self.port,
+                    print=print_null,
+                    ssl_context=self.ssl_context,
+                    handle_signals=False)
+
+
+def start_app(mp_queue,
+              exit_password,
+              host,
+              port,
+              cert_file=None,
+              key_file=None,
+              verbose=False):
+    print_out(f'start_app(host={host},port={port},cert={cert_file},key={key_file},verbose={verbose}) BEGIN')
+    try:
+        server = RealTimeVideoServer(mp_queue, exit_password, host, port, cert_file, key_file, verbose)
+        server.run()
+    except web.GracefulExit:
+        print_out(f'RealTimeVideoServer Graceful Exit')
+    except Exception as e:
+        print_error(f'RealTimeVideoServer Exception: {e}')
+    finally:
+        print_out(f'start_app() END')
+
 
 if __name__ == '__main__':
     pass

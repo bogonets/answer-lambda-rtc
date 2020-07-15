@@ -1,41 +1,15 @@
 # -*- coding: utf-8 -*-
 
-import asyncio
-import json
-import logging
-import os
 import sys
-import platform
-import ssl
-import string
-import random
-
 import http.client
 import urllib.parse
 
 from multiprocessing import Process, Queue
-from queue import Full, Empty
-
-import numpy as np
-
-from av import VideoFrame
-from aiohttp import web
-import aiohttp_cors
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
-from aiortc.contrib.media import MediaPlayer
+from queue import Full
 
 import rtc_realtime_video_server
 
 
-ROOT_DIR = os.path.dirname(__file__)
-INDEX_HTML_CONTENT = open(os.path.join(ROOT_DIR, 'index.html'), 'r').read()
-CLIENT_JS_CONTENT = open(os.path.join(ROOT_DIR, 'client.js'), 'r').read()
-INDEX_HTML_PATH = '/'
-CLIENT_JS_PATH = '/client.js'
-OFFER_PATH = '/offer'
-EXIT_SIGNAL_PATH = '/__exit_signal__'
-PASSWORD_PARAM_KEY = '@password'
-PASSWORD_LENGTH = 256
 DEFAULT_MAX_QUEUE_SIZE = 4
 DEFAULT_EXIT_TIMEOUT_SECONDS = 4.0
 
@@ -43,6 +17,7 @@ host = '0.0.0.0'
 port = 8888
 max_queue_size = DEFAULT_MAX_QUEUE_SIZE
 exit_timeout_seconds = DEFAULT_EXIT_TIMEOUT_SECONDS
+verbose = False
 
 rtc_process: Process
 producer_queue: Queue
@@ -77,14 +52,14 @@ def on_get(key):
 
 def on_init():
     global producer_password
-    producer_password = ''.join(random.choices(string.ascii_letters + string.digits, k=PASSWORD_LENGTH))
+    producer_password = rtc_realtime_video_server.generate_exit_password()
 
     global producer_queue
     global max_queue_size
     producer_queue = Queue(max_queue_size)
 
     global rtc_process
-    rtc_process = Process(target=rtc_realtime_video_server.start_app, args=(host, port, producer_queue, producer_password,))
+    rtc_process = Process(target=rtc_realtime_video_server.start_app, args=(producer_queue, producer_password, host, port,))
     rtc_process.start()
 
     sys.stderr.write(f'RTC process PID is {rtc_process.pid}.')
@@ -111,10 +86,10 @@ def on_run(image):
 
 def on_destroy():
     global producer_password
-    params = urllib.parse.urlencode({PASSWORD_PARAM_KEY: producer_password})
+    params = urllib.parse.urlencode({rtc_realtime_video_server.PASSWORD_PARAM_KEY: producer_password})
     headers = {'Content-type': 'application/x-www-form-urlencoded'}
     conn = http.client.HTTPConnection(f'{host}:{port}')
-    conn.request('POST', EXIT_SIGNAL_PATH, params, headers)
+    conn.request('POST', rtc_realtime_video_server.EXIT_SIGNAL_PATH, params, headers)
 
     global exit_timeout_seconds
     timeout = exit_timeout_seconds if exit_timeout_seconds > 0.0 else DEFAULT_EXIT_TIMEOUT_SECONDS

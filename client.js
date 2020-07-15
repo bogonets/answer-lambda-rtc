@@ -1,4 +1,26 @@
+const prefix = '[rtc.realtime_video.client.on_start] '
 var pc = null;
+
+function print_log(... args)
+{
+    console.log(prefix, ... args);
+}
+
+function print_error(... args)
+{
+    console.error(prefix, ... args);
+}
+
+function get_ices()
+{
+    return fetch('/ices', {method: 'GET'})
+        .then(function (response) {
+            return response.json();
+        })
+        .then(function (json) {
+            print_log(JSON.stringify(json));
+        });
+}
 
 function negotiate()
 {
@@ -43,8 +65,10 @@ function negotiate()
     });
 }
 
-function start()
+function on_start()
 {
+    print_log('on_start()')
+
     var config = {
         sdpSemantics: 'unified-plan'
     };
@@ -65,18 +89,19 @@ function start()
     negotiate();
 }
 
-function stop()
+function on_stop()
 {
+    print_log('on_stop()')
+
     // close peer connection
     setTimeout(function() {
         pc.close();
     }, 500);
 }
 
-window.addEventListener('load', function(event) {
-    start()
-});
-window.addEventListener('unload', function(event) {
-    stop()
-});
-
+window.addEventListener('load', function(e) {
+    on_start(e)
+})
+window.addEventListener('unload', function(e) {
+    on_stop(e)
+})
