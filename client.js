@@ -1,6 +1,7 @@
 var pc = null;
 
-function negotiate() {
+function negotiate()
+{
     pc.addTransceiver('video', {direction: 'recvonly'});
     // pc.addTransceiver('audio', {direction: 'recvonly'});
 
@@ -42,7 +43,8 @@ function negotiate() {
     });
 }
 
-function start() {
+function start()
+{
     var config = {
         sdpSemantics: 'unified-plan'
     };
@@ -60,16 +62,21 @@ function start() {
         }
     });
 
-    // document.getElementById('start').style.display = 'none';
     negotiate();
-    // document.getElementById('stop').style.display = 'inline-block';
 }
 
-function stop() {
-    // document.getElementById('stop').style.display = 'none';
-
+function stop()
+{
     // close peer connection
     setTimeout(function() {
         pc.close();
     }, 500);
 }
+
+window.addEventListener('load', function(event) {
+    start()
+});
+window.addEventListener('unload', function(event) {
+    stop()
+});
+

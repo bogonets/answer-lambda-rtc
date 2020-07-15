@@ -24,6 +24,8 @@ import aiohttp_cors
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
 from aiortc.contrib.media import MediaPlayer
 
+import rtc_realtime_video_server
+
 
 ROOT_DIR = os.path.dirname(__file__)
 INDEX_HTML_CONTENT = open(os.path.join(ROOT_DIR, 'index.html'), 'r').read()
@@ -52,35 +54,6 @@ consumer_password = ''
 peer_connections = set()
 empty_img = np.zeros((300, 300, 3), dtype=np.uint8)
 last_frame = VideoFrame.from_ndarray(empty_img, format='bgr24')
-
-
-class VideoImageTrack(VideoStreamTrack):
-    def __init__(self, queue):
-        super().__init__()  # don't forget this!
-        self.queue = queue
-
-    async def recv(self):
-        pts, time_base = await self.next_timestamp()
-
-        try:
-            img = self.queue.get_nowait()
-        except Empty:
-            img = None
-
-        global last_frame
-        if img is not None:
-            try:
-                frame = VideoFrame.from_ndarray(img, format='bgr24')
-            except:
-                frame = last_frame
-        else:
-            frame = last_frame
-
-        frame.pts = pts
-        frame.time_base = time_base
-        last_frame = frame
-
-        return frame
 
 
 async def on_exit_process_background():
@@ -135,7 +108,7 @@ async def on_offer(request):
     for t in pc.getTransceivers():
         if t.kind == 'video':
             global consumer_queue
-            pc.addTrack(VideoImageTrack(consumer_queue))
+            pc.addTrack(rtc_realtime_video_server.VideoImageTrack(consumer_queue))
         elif t.kind == 'audio':
             pass
 
