@@ -19,6 +19,7 @@ INDEX_HTML_CONTENT = open(os.path.join(ROOT_DIR, 'index.html'), 'r').read()
 CLIENT_JS_CONTENT = open(os.path.join(ROOT_DIR, 'client.js'), 'r').read()
 INDEX_HTML_PATH = '/'
 CLIENT_JS_PATH = '/client.js'
+CONFIG_PATH = '/config'
 OFFER_PATH = '/offer'
 EXIT_SIGNAL_PATH = '/__exit_signal__'
 PASSWORD_PARAM_KEY = '@password'
@@ -44,6 +45,53 @@ def print_null(*args):
 
 def generate_exit_password():
     return ''.join(random.choices(string.ascii_letters + string.digits, k=PASSWORD_LENGTH))
+
+
+def is_stun(text: str):
+    return text.find('turn:') == 0
+
+
+def is_turn(text: str):
+    return text.find('stun:') == 0
+
+
+def ice_to_dict(ice: str):
+    """
+    ``turn:admin:1234@localhost:3478`` -> ``{ urls: ['turn:localhost:3478'], username: 'admin', credential: '1234'}``
+    """
+
+    at_index = ice.find('@')
+    if at_index == -1:
+        return {'urls': [ice]}
+
+    if is_stun(ice):
+        schema = 'stun:'
+    elif is_turn(ice):
+        schema = 'turn:'
+    else:
+        return None
+
+    username, credential = ice[5:at_index].split(':')
+    address = ice[at_index+1]
+    return {'urls': [schema+address], 'username': username, 'credential': credential}
+
+
+def get_rtc_configuration_dict(ices: list):
+    result = {
+        'sdpSemantics': 'unified-plan',
+        'iceTransportPolicy': 'all',
+        'iceCandidatePoolSize': 0
+    }
+
+    ice_servers = list(filter(lambda x: x, [ice_to_dict(i) for i in ices]))
+    if ice_servers:
+        result['iceServers'] = ice_servers
+    else:
+        result['iceServers'] = [
+            {'urls': ['stun:stun.l.google.com:19302']}
+        ]
+
+    return result
 
 
 class Singleton:
@@ -109,7 +157,8 @@ class RealTimeVideoServer:
 
     def __init__(self,
                  mp_queue,
-                 exit_password,
+                 exit_password: str,
+                 ices: list,
                  host: str,
                  port: int,
                  cert_file=None,
@@ -117,6 +166,7 @@ class RealTimeVideoServer:
                  verbose=False):
         self.mp_queue = mp_queue
         self.exit_password = exit_password
+        self.ices = ices
         self.host = host
         self.port = port
         self.cert_file = cert_file
@@ -132,11 +182,14 @@ class RealTimeVideoServer:
         else:
             self.ssl_context = None
 
+        self.rtc_config_json = json.dumps(get_rtc_configuration_dict(self.ices))
+
         self.app = web.Application()
         self.app.on_shutdown.append(self.on_shutdown)
         self.app.on_cleanup.append(self.on_cleanup)
         self.app.router.add_get(INDEX_HTML_PATH, self.on_index_html)
         self.app.router.add_get(CLIENT_JS_PATH, self.on_client_js)
+        self.app.router.add_get(CONFIG_PATH, self.on_config)
         self.app.router.add_post(OFFER_PATH, self.on_offer)
         self.app.router.add_post(EXIT_SIGNAL_PATH, self.on_exit_signal)
 
@@ -176,6 +229,10 @@ class RealTimeVideoServer:
     async def on_client_js(self, request):
         print_out(f'RealTimeVideoServer.on_client_js(remote={request.remote})')
         return web.Response(content_type='application/javascript', text=CLIENT_JS_CONTENT)
+
+    async def on_config(self, request):
+        print_out(f'RealTimeVideoServer.on_config(remote={request.remote})')
+        return web.Response(content_type='application/json', text=self.rtc_config_json)
 
     async def on_offer(self, request):
         print_out(f'RealTimeVideoServer.on_offer(remote={request.remote})')
@@ -243,15 +300,16 @@ class RealTimeVideoServer:
 
 
 def start_app(mp_queue,
-              exit_password,
-              host,
-              port,
+              exit_password: str,
+              ices: list,
+              host: str,
+              port: int,
               cert_file=None,
               key_file=None,
               verbose=False):
     print_out(f'start_app(host={host},port={port},cert={cert_file},key={key_file},verbose={verbose}) BEGIN')
     try:
-        server = RealTimeVideoServer(mp_queue, exit_password, host, port, cert_file, key_file, verbose)
+        server = RealTimeVideoServer(mp_queue, exit_password, ices, host, port, cert_file, key_file, verbose)
         server.run()
     except web.GracefulExit:
         print_out(f'RealTimeVideoServer Graceful Exit')

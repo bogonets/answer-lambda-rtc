@@ -15,6 +15,7 @@ DEFAULT_EXIT_TIMEOUT_SECONDS = 4.0
 
 host = '0.0.0.0'
 port = 8888
+ices = ['stun:stun.l.google.com:19302']
 max_queue_size = DEFAULT_MAX_QUEUE_SIZE
 exit_timeout_seconds = DEFAULT_EXIT_TIMEOUT_SECONDS
 verbose = False
@@ -31,6 +32,9 @@ def on_set(key, val):
     elif key == 'port':
         global port
         port = int(val)
+    elif key == 'ices':
+        global ices
+        ices = list(map(lambda x: int(x), str(val).split(',')))
     elif key == 'max_queue_size':
         global max_queue_size
         max_queue_size = int(val)
@@ -44,6 +48,8 @@ def on_get(key):
         return host
     elif key == 'port':
         return port
+    elif key == 'shape':
+        return ','.join(list(map(lambda x: str(x), ices)))
     elif key == 'max_queue_size':
         return max_queue_size
     elif key == 'exit_timeout_seconds':
@@ -59,7 +65,7 @@ def on_init():
     producer_queue = Queue(max_queue_size)
 
     global rtc_process
-    rtc_process = Process(target=rtc_realtime_video_server.start_app, args=(producer_queue, producer_password, host, port,))
+    rtc_process = Process(target=rtc_realtime_video_server.start_app, args=(producer_queue, producer_password, ices, host, port,))
     rtc_process.start()
 
     sys.stderr.write(f'RTC process PID is {rtc_process.pid}.')
