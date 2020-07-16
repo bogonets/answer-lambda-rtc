@@ -115,6 +115,9 @@ class RealTimeVideo:
         self.push(image)
 
     def on_destroy(self):
+        assert self.queue is not None
+        assert self.process is not None
+
         timeout = self.exit_timeout_seconds
         print_out(f'RealTimeVideo.on_destroy(timeout={timeout}s)')
 
@@ -126,11 +129,11 @@ class RealTimeVideo:
             timeout = timeout - (request_end - request_begin)
             timeout = timeout if timeout >= 0.0 else 0.0
 
-            if request_result:
-                print_out(f'Join({timeout}s) the RTC process.')
-                self.process.join(timeout=timeout)
-            else:
+            if not request_result:
                 print_error(f'Exit request failure.')
+
+        print_out(f'Join({timeout}s) the RTC process.')
+        self.process.join(timeout=timeout)
 
         if self.process.is_alive():
             print_error('Send a KILL signal to the server process.')
