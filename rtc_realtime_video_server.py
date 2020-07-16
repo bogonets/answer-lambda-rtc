@@ -22,6 +22,7 @@ CLIENT_JS_PATH = '/client.js'
 CONFIG_PATH = '/config'
 OFFER_PATH = '/offer'
 EXIT_SIGNAL_PATH = '/__exit_signal__'
+DEFAULT_REQUEST_EXIT_TIMEOUT = 30.0
 PASSWORD_PARAM_KEY = '@password'
 PASSWORD_LENGTH = 256
 EMPTY_IMAGE = np.zeros((300, 300, 3), dtype=np.uint8)
@@ -92,6 +93,26 @@ def get_rtc_configuration_dict(ices: list):
         ]
 
     return result
+
+
+def request_exit(host: str, port: int, exit_password: str, timeout=DEFAULT_REQUEST_EXIT_TIMEOUT):
+    print_out(f'request_exit -> Request: host={host}, port={port}, timeout={timeout}')
+    try:
+        import http.client
+        import urllib.parse
+        params = urllib.parse.urlencode({PASSWORD_PARAM_KEY: exit_password})
+        headers = {'Content-type': 'application/x-www-form-urlencoded'}
+        conn = http.client.HTTPConnection(host=host, port=port, timeout=timeout)
+        conn.request('POST', EXIT_SIGNAL_PATH, params, headers)
+        response = conn.getresponse()
+        if response.status == 200:
+            return True
+        else:
+            print_error(f'request_exit -> Response Error: status={response.status}, reason={response.reason}')
+            return False
+    except Exception as e:
+        print_error(f'request_exit -> Exception catch: {e}')
+        return False
 
 
 class Singleton:
