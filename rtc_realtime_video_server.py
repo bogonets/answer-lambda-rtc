@@ -118,7 +118,7 @@ class Singleton:
     __instance = None
 
     @classmethod
-    def __get_instance(cls):
+    def __get_instance(cls, *args, **kwargs):
         return cls.__instance
 
     @classmethod
