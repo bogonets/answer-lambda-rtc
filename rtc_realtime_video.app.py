@@ -57,7 +57,7 @@ class RealTimeVideo:
             return self.host
         elif key == 'port':
             return self.port
-        elif key == 'shape':
+        elif key == 'ices':
             return ','.join(list(map(lambda x: str(x), self.ices)))
         elif key == 'max_queue_size':
             return self.max_queue_size

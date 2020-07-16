@@ -4,8 +4,8 @@
         "version": "1.0.0",
         "category": "rtc",
         "keywords": ["rtc"],
-        "homepage": "https://answer.bogonets.com/",
-        "bugs": "https://answer.bogonets.com/",
+        "homepage": "https://github.com/bogonets/answer-lambda-rtc",
+        "bugs": "https://github.com/bogonets/answer-lambda-rtc/issues",
         "license": "Bogonet License",
         "author": "zer0",
         "dependencies": [
@@ -28,8 +28,10 @@
             "en": "Real-time video using WebRTC.",
             "ko": "WebRTC를 사용한 실시간 비디오."
         },
-        "documentation_mime": "text",
-        "documentations": {},
+        "documentation_mime": "text/uri-list",
+        "documentations": {
+            "ko": "http://answerdoc.bogonets.com/ko/latest/lambdas/rtc/realtime_video.html"
+        },
         "meta": {}
     },
     "controls": {
@@ -98,6 +100,25 @@
             "help": {
                 "en": "Maximum waiting time when destroying lambdas. (seconds)",
                 "ko": "람다 파괴시 최대 대기 시간. (초)"
+            }
+        },
+        {
+            "rule": "initialize_only",
+            "name": "ices",
+            "default_value": "stun:stun.l.google.com:19302",
+            "type": "str",
+            "required": true,
+            "valid": {
+                "advance": true,
+                "hint": "stun:localhost;stun:stun.l.google.com:19302"
+            },
+            "title": {
+                "en": "ICEs",
+                "ko": "ICEs"
+            },
+            "help": {
+                "en": "List of ICE servers.",
+                "ko": "ICE 서버 목록."
             }
         }
     ]
