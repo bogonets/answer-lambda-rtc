@@ -34,6 +34,8 @@ class RealTimeVideo:
         self.ices = ['stun:stun.l.google.com:19302']
         self.max_queue_size = DEFAULT_MAX_QUEUE_SIZE
         self.exit_timeout_seconds = DEFAULT_EXIT_TIMEOUT_SECONDS
+        self.fps = vs.DEFAULT_VIDEO_FPS
+        self.frame_format = vs.DEFAULT_FRAME_FORMAT
         self.verbose = False
 
         self.exit_password = vs.generate_exit_password()
@@ -46,11 +48,17 @@ class RealTimeVideo:
         elif key == 'port':
             self.port = int(val)
         elif key == 'ices':
-            self.ices = list(map(lambda x: int(x), str(val).split(',')))
+            self.ices = list(map(lambda x: x, str(val).split(',')))
         elif key == 'max_queue_size':
             self.max_queue_size = int(val)
         elif key == 'exit_timeout_seconds':
             self.exit_timeout_seconds = float(val) if float(val) >= 0.0 else 0.0
+        elif key == 'fps':
+            self.fps = int(val)
+        elif key == 'frame_format':
+            self.frame_format = val
+        elif key == 'verbose':
+            self.verbose = bool(val)
 
     def on_get(self, key):
         if key == 'host':
@@ -63,6 +71,12 @@ class RealTimeVideo:
             return self.max_queue_size
         elif key == 'exit_timeout_seconds':
             return self.exit_timeout_seconds
+        elif key == 'fps':
+            return self.fps
+        elif key == 'frame_format':
+            return self.frame_format
+        elif key == 'verbose':
+            return self.verbose
 
     def _put_nowait(self, data):
         try:
@@ -87,7 +101,9 @@ class RealTimeVideo:
         self.queue = Queue(self.max_queue_size)
         self.process = Process(target=vs.start_app,
                                args=(self.queue, self.exit_password, self.exit_timeout_seconds,
-                                     self.ices, self.host, self.port,))
+                                     self.ices, self.host, self.port,
+                                     self.fps, self.frame_format,
+                                     None, None, self.verbose))
         self.process.start()
         print_out(f'RealTimeVideo.on_init() Server process PID: {self.process.pid}')
         return self.process.is_alive()

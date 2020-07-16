@@ -5,13 +5,17 @@ import sys
 import string
 import random
 import ssl
+import time
 import json
 import importlib
+import fractions
 import asyncio
 import numpy as np
+from typing import Tuple
 from queue import Empty
 from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
+from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc.mediastreams import MediaStreamTrack, MediaStreamError
 
 ROOT_DIR = os.path.dirname(__file__)
 INDEX_HTML_CONTENT = open(os.path.join(ROOT_DIR, 'index.html'), 'r').read()
@@ -25,6 +29,8 @@ DEFAULT_REQUEST_EXIT_TIMEOUT = 30.0
 PASSWORD_PARAM_KEY = '@password'
 PASSWORD_LENGTH = 256
 EMPTY_IMAGE = np.zeros((300, 300, 3), dtype=np.uint8)
+DEFAULT_VIDEO_CLOCK_RATE = 90000
+DEFAULT_VIDEO_FPS = 12
 DEFAULT_FRAME_FORMAT = 'bgr24'
 LOGGING_PREFIX = '[rtc.realtime_video.server] '
 
@@ -149,17 +155,47 @@ class FrameQueue(Singleton):
         return self.last_frame
 
 
-class VideoImageTrack(VideoStreamTrack):
+class VideoImageTrack(MediaStreamTrack):
+    """
+    Video track to get the last frame.
+    """
 
-    def __init__(self, queue, frame_format=DEFAULT_FRAME_FORMAT):
+    kind = 'video'
+
+    _start: float
+    _timestamp: int
+
+    def __init__(self, queue, fps=DEFAULT_VIDEO_FPS, frame_format=DEFAULT_FRAME_FORMAT, verbose=False):
         super().__init__()  # don't forget this!
         self.queue = FrameQueue.instance(queue, frame_format)
+        self.fps = fps
+        self.ptime = 1.0 / float(fps)
+        self.video_clock_rate = DEFAULT_VIDEO_CLOCK_RATE
+        # The unit of time (in fractional seconds) in which timestamps are expressed.
+        self.video_time_base = fractions.Fraction(1, self.video_clock_rate)
+        self.verbose = verbose
+        print_out(f'VideoImageTrack(fps={fps},frame_format={frame_format},verbose={verbose}')
+
+    async def next_timestamp(self) -> Tuple[int, fractions.Fraction]:
+        if self.readyState != 'live':
+            raise MediaStreamError
+
+        if hasattr(self, '_timestamp'):
+            self._timestamp += int(self.ptime * self.video_clock_rate)
+            wait = self._start + (self._timestamp / self.video_clock_rate) - time.time()
+            await asyncio.sleep(wait)
+        else:
+            self._start = time.time()
+            self._timestamp = 0
+        return self._timestamp, self.video_time_base
 
     async def recv(self):
         pts, time_base = await self.next_timestamp()
         frame = self.queue.pop()
         frame.pts = pts
         frame.time_base = time_base
+        if self.verbose:
+            print_out(f'VideoImageTrack.recv(frame={frame})')
         return frame
 
 
@@ -174,6 +210,8 @@ class RealTimeVideoServer:
                  ices: list,
                  host: str,
                  port: int,
+                 fps: int,
+                 frame_format: str,
                  cert_file=None,
                  key_file=None,
                  verbose=False):
@@ -183,6 +221,8 @@ class RealTimeVideoServer:
         self.ices = ices
         self.host = host
         self.port = port
+        self.fps = fps
+        self.frame_format = frame_format
         self.backlog = 128
         self.cert_file = cert_file
         self.key_file = key_file
@@ -218,7 +258,7 @@ class RealTimeVideoServer:
 
         self.peer_connections = set()
 
-        print_out(f'RealTimeVideoServer() OK.')
+        print_out(f'RealTimeVideoServer() constructor done')
 
     async def on_exit_process_background(self):
         await self.app.shutdown()
@@ -266,6 +306,8 @@ class RealTimeVideoServer:
             elif pc.iceConnectionState == 'failed':
                 await pc.close()
                 self.peer_connections.discard(pc)
+            elif pc.iceConnectionState == 'closed':
+                pass
 
         # open media source
         # if args.play_from:
@@ -281,7 +323,10 @@ class RealTimeVideoServer:
 
         for t in pc.getTransceivers():
             if t.kind == 'video':
-                pc.addTrack(VideoImageTrack(self.mp_queue))
+                pc.addTrack(VideoImageTrack(queue=self.mp_queue,
+                                            fps=self.fps,
+                                            frame_format=self.frame_format,
+                                            verbose=self.verbose))
             elif t.kind == 'audio':
                 pass
 
@@ -324,13 +369,18 @@ def start_app(mp_queue,
               ices: list,
               host: str,
               port: int,
+              fps: int,
+              frame_format: str,
               cert_file=None,
               key_file=None,
               verbose=False):
-    print_out(f'start_app(host={host},port={port},cert={cert_file},key={key_file},verbose={verbose}) BEGIN')
+    args_text = 'host={},port={},fps={},format={},cert={},key={},verbose={}'.format(
+        host, port, fps, frame_format, cert_file, key_file, verbose)
+    print_out(f'start_app({args_text}) BEGIN')
     try:
         server = RealTimeVideoServer(mp_queue, exit_password, exit_timeout,
-                                     ices, host, port, cert_file, key_file, verbose)
+                                     ices, host, port, fps, frame_format,
+                                     cert_file, key_file, verbose)
         server.run()
     except web.GracefulExit:
         print_out(f'RealTimeVideoServer Graceful Exit')

@@ -106,7 +106,7 @@
             "rule": "initialize_only",
             "name": "ices",
             "default_value": "stun:stun.l.google.com:19302",
-            "type": "str",
+            "type": "csv",
             "required": true,
             "valid": {
                 "advance": true,
@@ -119,6 +119,61 @@
             "help": {
                 "en": "List of ICE servers.",
                 "ko": "ICE 서버 목록."
+            }
+        },
+        {
+            "rule": "initialize_only",
+            "name": "fps",
+            "default_value": 12,
+            "type": "int",
+            "required": true,
+            "valid": {
+                "advance": true
+            },
+            "title": {
+                "en": "FPS",
+                "ko": "FPS"
+            },
+            "help": {
+                "en": "Frames Per Second",
+                "ko": "Frames Per Second"
+            }
+        },
+        {
+            "rule": "initialize_only",
+            "name": "frame_format",
+            "default_value": "rgb24",
+            "type": "str",
+            "required": true,
+            "valid": {
+                "advance": true,
+                "list": "rgb24;bgr24"
+            },
+            "title": {
+                "en": "Frame Format",
+                "ko": "Frame Format"
+            },
+            "help": {
+                "en": "Frame Format",
+                "ko": "Frame Format"
+            }
+        },
+        {
+            "rule": "initialize_only",
+            "name": "verbose",
+            "default_value": false,
+            "type": "bool",
+            "required": false,
+            "valid": {
+                "advance": true
+            },
+            "title": {
+                "en": "Verbose",
+                "ko": "상세한"
+            },
+            "help": {
+                "en": "Verbose Logging",
+                "ko": "상세 로깅"
             }
         }
     ]
