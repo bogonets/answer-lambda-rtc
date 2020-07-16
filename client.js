@@ -82,11 +82,11 @@ class RealTimeVideoClient
             self.on_track(event);
         });
 
-        this.negotiate();
+        this.do_negotiate();
     }
 
-    negotiate() {
-        this.print_debug('negotiate()');
+    do_negotiate() {
+        this.print_debug('do_negotiate()');
 
         this.pc.addTransceiver('video', {direction: 'recvonly'});
         if (this.audio_object) {
@@ -94,42 +94,48 @@ class RealTimeVideoClient
         }
 
         self = this;
-        return this.pc.createOffer().then(function(offer) {
-            return self.pc.setLocalDescription(offer);
-        }).then(function() {
-            // wait for ICE gathering to complete
-            return new Promise(function(resolve) {
-                if (self.pc.iceGatheringState === 'complete') {
-                    resolve();
-                } else {
-                    function checkState() {
-                        if (self.pc.iceGatheringState === 'complete') {
-                            self.pc.removeEventListener('icegatheringstatechange', checkState);
-                            resolve();
+        return this.pc.createOffer()
+            .then(function(offer) {
+                return self.pc.setLocalDescription(offer);
+            })
+            .then(function() {
+                // Wait for ICE gathering to complete.
+                return new Promise(function(resolve) {
+                    if (self.pc.iceGatheringState === 'complete') {
+                        resolve();
+                    } else {
+                        function check_state() {
+                            if (self.pc.iceGatheringState === 'complete') {
+                                self.pc.removeEventListener('icegatheringstatechange', check_state);
+                                resolve();
+                            }
                         }
+                        self.pc.addEventListener('icegatheringstatechange', check_state);
                     }
-                    self.pc.addEventListener('icegatheringstatechange', checkState);
-                }
+                });
+            })
+            .then(function() {
+                var offer = self.pc.localDescription;
+                return fetch('/offer', {
+                    body: JSON.stringify({
+                        sdp: offer.sdp,
+                        type: offer.type,
+                    }),
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    method: 'POST'
+                });
+            })
+            .then(function(response) {
+                return response.json();
+            })
+            .then(function(answer) {
+                return self.pc.setRemoteDescription(answer);
+            })
+            .catch(function(e) {
+                alert(e);
             });
-        }).then(function() {
-            var offer = self.pc.localDescription;
-            return fetch('/offer', {
-                body: JSON.stringify({
-                    sdp: offer.sdp,
-                    type: offer.type,
-                }),
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                method: 'POST'
-            });
-        }).then(function(response) {
-            return response.json();
-        }).then(function(answer) {
-            return self.pc.setRemoteDescription(answer);
-        }).catch(function(e) {
-            alert(e);
-        });
     }
 
     on_track(event) {
@@ -140,83 +146,6 @@ class RealTimeVideoClient
             this.audio_object.srcObject = event.streams[0];
         }
     }
-}
-
-function negotiate()
-{
-    pc.addTransceiver('video', {direction: 'recvonly'});
-    // pc.addTransceiver('audio', {direction: 'recvonly'});
-
-    return pc.createOffer().then(function(offer) {
-        return pc.setLocalDescription(offer);
-    }).then(function() {
-        // wait for ICE gathering to complete
-        return new Promise(function(resolve) {
-            if (pc.iceGatheringState === 'complete') {
-                resolve();
-            } else {
-                function checkState() {
-                    if (pc.iceGatheringState === 'complete') {
-                        pc.removeEventListener('icegatheringstatechange', checkState);
-                        resolve();
-                    }
-                }
-                pc.addEventListener('icegatheringstatechange', checkState);
-            }
-        });
-    }).then(function() {
-        var offer = pc.localDescription;
-        return fetch('/offer', {
-            body: JSON.stringify({
-                sdp: offer.sdp,
-                type: offer.type,
-            }),
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            method: 'POST'
-        });
-    }).then(function(response) {
-        return response.json();
-    }).then(function(answer) {
-        return pc.setRemoteDescription(answer);
-    }).catch(function(e) {
-        alert(e);
-    });
-}
-
-function on_start()
-{
-    print_log('on_start()')
-
-    var config = {
-        sdpSemantics: 'unified-plan'
-    };
-
-    config.iceServers = [{urls: ['stun:stun.l.google.com:19302']}];
-
-    pc = new RTCPeerConnection(config);
-
-    // connect audio / video
-    pc.addEventListener('track', function(evt) {
-        if (evt.track.kind == 'video') {
-            document.getElementById('rtc-realtime-video').srcObject = evt.streams[0];
-        } else {
-            // document.getElementById('audio').srcObject = evt.streams[0];
-        }
-    });
-
-    negotiate();
-}
-
-function on_stop()
-{
-    print_log('on_stop()')
-
-    // close peer connection
-    setTimeout(function() {
-        pc.close();
-    }, 500);
 }
 
 var default_video_client = new RealTimeVideoClient('client', 'rtc-realtime-video')
