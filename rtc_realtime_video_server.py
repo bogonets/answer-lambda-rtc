@@ -5,14 +5,13 @@ import sys
 import string
 import random
 import ssl
-import numpy as np
-
+import json
 import importlib
+import asyncio
+import numpy as np
 from queue import Empty
-
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
-from pygments.lexer import inherit
 
 ROOT_DIR = os.path.dirname(__file__)
 INDEX_HTML_CONTENT = open(os.path.join(ROOT_DIR, 'index.html'), 'r').read()
@@ -49,11 +48,11 @@ def generate_exit_password():
 
 
 def is_stun(text: str):
-    return text.find('turn:') == 0
+    return text[:5] == 'turn:'
 
 
 def is_turn(text: str):
-    return text.find('stun:') == 0
+    return text[:5] == 'stun:'
 
 
 def ice_to_dict(ice: str):
@@ -70,7 +69,7 @@ def ice_to_dict(ice: str):
     elif is_turn(ice):
         schema = 'turn:'
     else:
-        return None
+        return None  # For filtering ...
 
     username, credential = ice[5:at_index].split(':')
     address = ice[at_index+1]
@@ -145,7 +144,7 @@ class FrameQueue(Singleton):
     def pop(self):
         try:
             self.update(self.queue.get_nowait())
-        except:
+        except Empty:
             pass
         return self.last_frame
 
@@ -164,14 +163,6 @@ class VideoImageTrack(VideoStreamTrack):
         return frame
 
 
-import aiohttp_cors
-from aiortc import RTCPeerConnection, RTCSessionDescription
-from multiprocessing import Queue
-import asyncio
-import logging
-import json
-
-
 class RealTimeVideoServer:
     """
     """
@@ -179,6 +170,7 @@ class RealTimeVideoServer:
     def __init__(self,
                  mp_queue,
                  exit_password: str,
+                 exit_timeout: float,
                  ices: list,
                  host: str,
                  port: int,
@@ -187,15 +179,14 @@ class RealTimeVideoServer:
                  verbose=False):
         self.mp_queue = mp_queue
         self.exit_password = exit_password
+        self.exit_timeout = exit_timeout
         self.ices = ices
         self.host = host
         self.port = port
+        self.backlog = 128
         self.cert_file = cert_file
         self.key_file = key_file
         self.verbose = verbose
-
-        if self.verbose:
-            logging.basicConfig(level=logging.DEBUG)
 
         if self.cert_file and self.key_file:
             self.ssl_context = ssl.SSLContext()
@@ -214,6 +205,7 @@ class RealTimeVideoServer:
         self.app.router.add_post(OFFER_PATH, self.on_offer)
         self.app.router.add_post(EXIT_SIGNAL_PATH, self.on_exit_signal)
 
+        import aiohttp_cors
         self.cors = aiohttp_cors.setup(self.app, defaults={
             '*': aiohttp_cors.ResourceOptions(
                 allow_credentials=True,
@@ -267,7 +259,11 @@ class RealTimeVideoServer:
         @pc.on('iceconnectionstatechange')
         async def on_ice_connection_state_change():
             print_out(f'on_ice_connection_state_change({pc.iceConnectionState})')
-            if pc.iceConnectionState == 'failed':
+            if pc.iceConnectionState == 'checking':
+                pass
+            elif pc.iceConnectionState == 'completed':
+                pass
+            elif pc.iceConnectionState == 'failed':
                 await pc.close()
                 self.peer_connections.discard(pc)
 
@@ -312,16 +308,19 @@ class RealTimeVideoServer:
         pass
 
     def run(self):
-        web.run_app(self.app,
+        web.run_app(app=self.app,
                     host=self.host,
                     port=self.port,
-                    print=print_null,
+                    shutdown_timeout=self.exit_timeout,
                     ssl_context=self.ssl_context,
+                    print=print_null,
+                    backlog=self.backlog,
                     handle_signals=False)
 
 
 def start_app(mp_queue,
               exit_password: str,
+              exit_timeout: float,
               ices: list,
               host: str,
               port: int,
@@ -330,7 +329,8 @@ def start_app(mp_queue,
               verbose=False):
     print_out(f'start_app(host={host},port={port},cert={cert_file},key={key_file},verbose={verbose}) BEGIN')
     try:
-        server = RealTimeVideoServer(mp_queue, exit_password, ices, host, port, cert_file, key_file, verbose)
+        server = RealTimeVideoServer(mp_queue, exit_password, exit_timeout,
+                                     ices, host, port, cert_file, key_file, verbose)
         server.run()
     except web.GracefulExit:
         print_out(f'RealTimeVideoServer Graceful Exit')
