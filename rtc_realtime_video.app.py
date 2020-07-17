@@ -2,6 +2,7 @@
 
 import sys
 import time
+import psutil
 
 from multiprocessing import Process, Queue
 from queue import Full, Empty
@@ -11,7 +12,7 @@ import rtc_realtime_video_server as vs
 
 LOGGING_PREFIX = '[rtc.realtime_video] '
 DEFAULT_MAX_QUEUE_SIZE = 4
-DEFAULT_EXIT_TIMEOUT_SECONDS = 4.0
+UNKNOWN_PID = 0
 
 
 def print_out(message):
@@ -24,23 +25,37 @@ def print_error(message):
     sys.stderr.flush()
 
 
+class CreateProcessError(Exception):
+    pass
+
+
 class RealTimeVideo:
     """
     """
 
-    def __init__(self):
-        self.host = '0.0.0.0'
-        self.port = 8888
-        self.ices = ['stun:stun.l.google.com:19302']
-        self.max_queue_size = DEFAULT_MAX_QUEUE_SIZE
-        self.exit_timeout_seconds = DEFAULT_EXIT_TIMEOUT_SECONDS
-        self.fps = vs.DEFAULT_VIDEO_FPS
-        self.frame_format = vs.DEFAULT_FRAME_FORMAT
-        self.verbose = False
+    def __init__(self,
+                 host=vs.DEFAULT_HOST,
+                 port=vs.DEFAULT_PORT,
+                 ices=vs.DEFAULT_ICES,
+                 max_queue_size=DEFAULT_MAX_QUEUE_SIZE,
+                 exit_timeout_seconds=vs.DEFAULT_EXIT_TIMEOUT_SECONDS,
+                 fps=vs.DEFAULT_VIDEO_FPS,
+                 frame_format=vs.DEFAULT_FRAME_FORMAT,
+                 verbose=False):
+        self.host = host
+        self.port = port
+        self.ices = ices
+        self.max_queue_size = max_queue_size
+        self.exit_timeout_seconds = exit_timeout_seconds
+        self.fps = fps
+        self.frame_format = frame_format
+        self.verbose = verbose
 
         self.exit_password = vs.generate_exit_password()
+
         self.process: Process = None
         self.queue: Queue = None
+        self.pid = UNKNOWN_PID
 
     def on_set(self, key, val):
         if key == 'host':
@@ -97,7 +112,10 @@ class RealTimeVideo:
         self._get_nowait()
         return self._put_nowait(data)
 
-    def on_init(self):
+    def _create_process_impl(self):
+        assert self.queue is None
+        assert self.process is None
+
         self.queue = Queue(self.max_queue_size)
         self.process = Process(target=vs.start_app,
                                args=(self.queue, self.exit_password, self.exit_timeout_seconds,
@@ -105,51 +123,107 @@ class RealTimeVideo:
                                      self.fps, self.frame_format,
                                      None, None, self.verbose))
         self.process.start()
-        print_out(f'RealTimeVideo.on_init() Server process PID: {self.process.pid}')
-        return self.process.is_alive()
+        if self.process.is_alive():
+            self.pid = self.process.pid
+            print_out(f'RealTimeVideo._create_process_impl() Server process PID: {self.pid}')
+            return True
+        else:
+            print_error(f'RealTimeVideo._create_process_impl() Server process is not alive.')
+            return False
+
+    def _create_process(self):
+        try:
+            return self._create_process_impl()
+        except Exception as e:
+            print_error(f'RealTimeVideo._create_process() Exception: {e}')
+            return False
+
+    def _close_process_impl(self):
+        if self.process is not None:
+            timeout = self.exit_timeout_seconds
+            if self.process.is_alive():
+                request_begin = time.time()
+                print_out(f'RealTimeVideo._close_process_impl() RequestExit(timeout={timeout}s)')
+                request_result = vs.request_exit(self.host, self.port, self.exit_password, timeout)
+                timeout = timeout - (time.time() - request_begin)
+                timeout = timeout if timeout >= 0.0 else 0.0
+                if not request_result:
+                    print_error(f'RealTimeVideo._close_process_impl() Exit request failure.')
+
+            print_out(f'RealTimeVideo._close_process_impl() Join(timeout={timeout}s) the RTC process.')
+            self.process.join(timeout=timeout)
+
+            if self.process.is_alive():
+                print_error(f'RealTimeVideo._close_process_impl() Send a KILL signal to the server process.')
+                self.process.kill()
+
+        # A negative value -N indicates that the child was terminated by signal N.
+        print_out(f'RealTimeVideo._close_process_impl() The exit code of RTC process is {self.process.exitcode}.')
+
+        if self.queue is not None:
+            self.queue.close()
+            self.queue.cancel_join_thread()
+            self.queue = None
+
+        if self.process is not None:
+            self.process.close()
+            self.process = None
+
+        if self.pid >= 1:
+            if psutil.pid_exists(self.pid):
+                print_out(f'Force kill PID: {self.pid}')
+                psutil.Process(self.pid).kill()
+            self.pid = UNKNOWN_PID
+
+        assert self.queue is None
+        assert self.process is None
+        assert self.pid is UNKNOWN_PID
+        print_out(f'RealTimeVideo._close_process_impl() Done.')
+
+    def _close_process(self):
+        try:
+            self._close_process_impl()
+        except Exception as e:
+            print_error(f'RealTimeVideo._close_process() Exception: {e}')
+        finally:
+            self.queue = None
+            self.process = None
+            self.pid = UNKNOWN_PID
+
+    def create_process(self):
+        if self._create_process():
+            return True
+        self._close_process()
+        return False
+
+    def is_reopen(self):
+        if self.process is None:
+            return True
+        if not self.process.is_alive():
+            return True
+        return False
+
+    def reopen(self):
+        self._close_process()
+        if self._create_process():
+            print_out(f'Recreated Server process PID: {self.pid}')
+        else:
+            raise CreateProcessError
+
+    def on_init(self):
+        return self.create_process()
 
     def on_valid(self):
-        return self.process.is_alive()
+        return self.pid >= 0
 
     def on_run(self, image):
+        if self.is_reopen():
+            self.reopen()
+
         self.push(image)
 
     def on_destroy(self):
-        assert self.queue is not None
-        assert self.process is not None
-
-        timeout = self.exit_timeout_seconds
-        print_out(f'RealTimeVideo.on_destroy(timeout={timeout}s)')
-
-        if self.process.is_alive():
-            request_begin = time.time()
-            request_result = vs.request_exit(self.host, self.port, self.exit_password, timeout)
-            request_end = time.time()
-
-            timeout = timeout - (request_end - request_begin)
-            timeout = timeout if timeout >= 0.0 else 0.0
-
-            if not request_result:
-                print_error(f'Exit request failure.')
-
-        print_out(f'Join({timeout}s) the RTC process.')
-        self.process.join(timeout=timeout)
-
-        if self.process.is_alive():
-            print_error('Send a KILL signal to the server process.')
-            self.process.kill()
-
-        # A negative value -N indicates that the child was terminated by signal N.
-        print_out(f'The exit code of RTC process is {self.process.exitcode}.')
-
-        self.queue.close()
-        self.queue.cancel_join_thread()
-        self.queue = None
-
-        self.process.close()
-        self.process = None
-
-        print_out(f'RealTimeVideo.on_destroy() Done.')
+        self._close_process()
 
 
 MAIN_HANDLER = RealTimeVideo()

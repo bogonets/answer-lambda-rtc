@@ -13,7 +13,8 @@
             {"type": "pip", "src": "av"},
             {"type": "pip", "src": "aiohttp"},
             {"type": "pip", "src": "aiohttp_cors"},
-            {"type": "pip", "src": "aiortc"}
+            {"type": "pip", "src": "aiortc"},
+            {"type": "pip", "src": "psutil"}
         ],
         "engines": ">=1.1.3",
         "environment": {

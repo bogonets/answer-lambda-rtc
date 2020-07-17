@@ -10,6 +10,7 @@ import json
 import importlib
 import fractions
 import asyncio
+import av
 import numpy as np
 from typing import Tuple
 from queue import Empty
@@ -17,18 +18,18 @@ from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc.mediastreams import MediaStreamTrack, MediaStreamError
 
-ROOT_DIR = os.path.dirname(__file__)
-INDEX_HTML_CONTENT = open(os.path.join(ROOT_DIR, 'index.html'), 'r').read()
-CLIENT_JS_CONTENT = open(os.path.join(ROOT_DIR, 'client.js'), 'r').read()
 INDEX_HTML_PATH = '/'
 CLIENT_JS_PATH = '/client.js'
 CONFIG_PATH = '/config'
 OFFER_PATH = '/offer'
 EXIT_SIGNAL_PATH = '/__exit_signal__'
-DEFAULT_REQUEST_EXIT_TIMEOUT = 30.0
 PASSWORD_PARAM_KEY = '@password'
 PASSWORD_LENGTH = 256
-EMPTY_IMAGE = np.zeros((300, 300, 3), dtype=np.uint8)
+DEFAULT_REQUEST_EXIT_TIMEOUT = 8.0
+DEFAULT_EXIT_TIMEOUT_SECONDS = 8.0
+DEFAULT_HOST = '0.0.0.0'
+DEFAULT_PORT = 8080
+DEFAULT_ICES = ('stun:stun.l.google.com:19302',)
 DEFAULT_VIDEO_CLOCK_RATE = 90000
 DEFAULT_VIDEO_FPS = 12
 DEFAULT_FRAME_FORMAT = 'bgr24'
@@ -137,15 +138,15 @@ class Singleton:
 class FrameQueue(Singleton):
 
     def __init__(self, queue, frame_format=DEFAULT_FRAME_FORMAT):
-        self.av = importlib.import_module('av')
+        self.EMPTY_IMAGE = np.zeros((300, 300, 3), dtype=np.uint8)
         self.queue = queue
         self.frame_format = frame_format
-        self.last_image = EMPTY_IMAGE
-        self.last_frame = self.av.VideoFrame.from_ndarray(EMPTY_IMAGE, format=frame_format)
+        self.last_image = self.EMPTY_IMAGE
+        self.last_frame = av.VideoFrame.from_ndarray(self.EMPTY_IMAGE, format=frame_format)
 
     def update(self, image):
         self.last_image = image
-        self.last_frame = self.av.VideoFrame.from_ndarray(self.last_image, format=self.frame_format)
+        self.last_frame = av.VideoFrame.from_ndarray(self.last_image, format=self.frame_format)
 
     def pop(self):
         try:
@@ -204,18 +205,22 @@ class RealTimeVideoServer:
     """
 
     def __init__(self,
-                 mp_queue,
+                 queue,
                  exit_password: str,
-                 exit_timeout: float,
-                 ices: list,
-                 host: str,
-                 port: int,
-                 fps: int,
-                 frame_format: str,
+                 exit_timeout=DEFAULT_EXIT_TIMEOUT_SECONDS,
+                 ices=DEFAULT_ICES,
+                 host=DEFAULT_HOST,
+                 port=DEFAULT_PORT,
+                 fps=DEFAULT_VIDEO_FPS,
+                 frame_format=DEFAULT_FRAME_FORMAT,
                  cert_file=None,
                  key_file=None,
                  verbose=False):
-        self.mp_queue = mp_queue
+        self.ROOT_DIR = os.path.dirname(__file__)
+        self.INDEX_HTML_CONTENT = open(os.path.join(self.ROOT_DIR, 'index.html'), 'r').read()
+        self.CLIENT_JS_CONTENT = open(os.path.join(self.ROOT_DIR, 'client.js'), 'r').read()
+
+        self.queue = queue
         self.exit_password = exit_password
         self.exit_timeout = exit_timeout
         self.ices = ices
@@ -261,6 +266,7 @@ class RealTimeVideoServer:
         print_out(f'RealTimeVideoServer() constructor done')
 
     async def on_exit_process_background(self):
+        print_out(f'RealTimeVideoServer.on_exit_process_background()')
         await self.app.shutdown()
         await self.app.cleanup()
         raise web.GracefulExit()
@@ -277,11 +283,11 @@ class RealTimeVideoServer:
 
     async def on_index_html(self, request):
         print_out(f'RealTimeVideoServer.on_index_html(remote={request.remote})')
-        return web.Response(content_type='text/html', text=INDEX_HTML_CONTENT)
+        return web.Response(content_type='text/html', text=self.INDEX_HTML_CONTENT)
 
     async def on_client_js(self, request):
         print_out(f'RealTimeVideoServer.on_client_js(remote={request.remote})')
-        return web.Response(content_type='application/javascript', text=CLIENT_JS_CONTENT)
+        return web.Response(content_type='application/javascript', text=self.CLIENT_JS_CONTENT)
 
     async def on_config(self, request):
         print_out(f'RealTimeVideoServer.on_config(remote={request.remote})')
@@ -323,7 +329,7 @@ class RealTimeVideoServer:
 
         for t in pc.getTransceivers():
             if t.kind == 'video':
-                pc.addTrack(VideoImageTrack(queue=self.mp_queue,
+                pc.addTrack(VideoImageTrack(queue=self.queue,
                                             fps=self.fps,
                                             frame_format=self.frame_format,
                                             verbose=self.verbose))
@@ -344,13 +350,14 @@ class RealTimeVideoServer:
         )
 
     async def on_shutdown(self, app):
+        print_out(f'RealTimeVideoServer.on_shutdown()')
         # close peer connections
         coros = [pc.close() for pc in self.peer_connections]
         await asyncio.gather(*coros)
         self.peer_connections.clear()
 
     async def on_cleanup(self, app):
-        pass
+        print_out(f'RealTimeVideoServer.on_cleanup()')
 
     def run(self):
         web.run_app(app=self.app,
@@ -363,14 +370,14 @@ class RealTimeVideoServer:
                     handle_signals=False)
 
 
-def start_app(mp_queue,
+def start_app(queue,
               exit_password: str,
-              exit_timeout: float,
-              ices: list,
-              host: str,
-              port: int,
-              fps: int,
-              frame_format: str,
+              exit_timeout=DEFAULT_EXIT_TIMEOUT_SECONDS,
+              ices=DEFAULT_ICES,
+              host=DEFAULT_HOST,
+              port=DEFAULT_PORT,
+              fps=DEFAULT_VIDEO_FPS,
+              frame_format=DEFAULT_FRAME_FORMAT,
               cert_file=None,
               key_file=None,
               verbose=False):
@@ -378,7 +385,7 @@ def start_app(mp_queue,
         host, port, fps, frame_format, cert_file, key_file, verbose)
     print_out(f'start_app({args_text}) BEGIN')
     try:
-        server = RealTimeVideoServer(mp_queue, exit_password, exit_timeout,
+        server = RealTimeVideoServer(queue, exit_password, exit_timeout,
                                      ices, host, port, fps, frame_format,
                                      cert_file, key_file, verbose)
         server.run()
