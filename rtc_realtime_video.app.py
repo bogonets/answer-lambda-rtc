@@ -2,6 +2,7 @@
 
 import sys
 import time
+import argparse
 import psutil
 
 from multiprocessing import Process, Queue
@@ -41,6 +42,8 @@ class RealTimeVideo:
                  exit_timeout_seconds=vs.DEFAULT_EXIT_TIMEOUT_SECONDS,
                  fps=vs.DEFAULT_VIDEO_FPS,
                  frame_format=vs.DEFAULT_FRAME_FORMAT,
+                 cert_file=None,
+                 key_file=None,
                  verbose=False):
         self.host = host
         self.port = port
@@ -50,6 +53,8 @@ class RealTimeVideo:
         self.fps = fps
         self.frame_format = frame_format
         self.verbose = verbose
+        self.cert_file = cert_file
+        self.key_file = key_file
 
         self.exit_password = vs.generate_exit_password()
 
@@ -121,7 +126,7 @@ class RealTimeVideo:
                                args=(self.queue, self.exit_password, self.exit_timeout_seconds,
                                      self.ices, self.host, self.port,
                                      self.fps, self.frame_format,
-                                     None, None, self.verbose))
+                                     self.cert_file, self.key_file, self.verbose))
         self.process.start()
         if self.process.is_alive():
             self.pid = self.process.pid
@@ -214,7 +219,7 @@ class RealTimeVideo:
         return self.create_process()
 
     def on_valid(self):
-        return self.pid >= 0
+        return self.pid != UNKNOWN_PID
 
     def on_run(self, image):
         if self.is_reopen():
@@ -253,5 +258,53 @@ def on_destroy():
     return MAIN_HANDLER.on_destroy()
 
 
+def main():
+    parser = argparse.ArgumentParser(description='RealTimeVideo demo')
+    parser.add_argument(
+        '--cert-file',
+        help='SSL certificate file (for HTTPS)')
+    parser.add_argument(
+        '--key-file',
+        help='SSL key file (for HTTPS)')
+    parser.add_argument(
+        '--source',
+        help='Read the media from a file and sent it.'),
+    parser.add_argument(
+        '--host',
+        default=vs.DEFAULT_HOST,
+        help=f'Host for HTTP server (default: {vs.DEFAULT_HOST})')
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=vs.DEFAULT_PORT,
+        help=f'Port for HTTP server (default: {vs.DEFAULT_PORT})')
+    parser.add_argument(
+        '--fps',
+        type=int,
+        default=vs.DEFAULT_VIDEO_FPS,
+        help=f'WebRTC Video FPS (default: {vs.DEFAULT_VIDEO_FPS})')
+    parser.add_argument(
+        '--verbose',
+        '-v',
+        action='count')
+    args = parser.parse_args()
+
+    video = RealTimeVideo(host=args.host, port=args.port, fps=args.fps, frame_format='bgr24',
+                          cert_file=args.cert_file, key_file=args.key_file, verbose=bool(args.verbose))
+    video.on_init()
+
+    import cv2
+    import time
+    cap = cv2.VideoCapture(args.source)
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        video.on_run(frame)
+        time.sleep(1.0/args.fps)
+    cap.release()
+    video.on_destroy()
+
+
 if __name__ == '__main__':
-    pass
+    main()
