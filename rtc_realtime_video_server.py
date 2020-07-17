@@ -305,15 +305,10 @@ class RealTimeVideoServer:
         @pc.on('iceconnectionstatechange')
         async def on_ice_connection_state_change():
             print_out(f'on_ice_connection_state_change({pc.iceConnectionState})')
-            if pc.iceConnectionState == 'checking':
-                pass
-            elif pc.iceConnectionState == 'completed':
-                pass
-            elif pc.iceConnectionState == 'failed':
+            # https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/iceConnectionState
+            if pc.iceConnectionState == 'failed':
                 await pc.close()
                 self.peer_connections.discard(pc)
-            elif pc.iceConnectionState == 'closed':
-                pass
 
         # open media source
         # if args.play_from:

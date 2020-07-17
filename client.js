@@ -62,14 +62,14 @@ class RealTimeVideoClient
             });
     }
 
-    on_config_ok(json) {
-        this.print_debug('on_config_ok()');
-        this.on_create_connection(json);
-    }
-
     on_config_error(error) {
         this.print_error('on_config_error()', error);
         this.on_create_connection(this.default_config);
+    }
+
+    on_config_ok(json) {
+        this.print_debug('on_config_ok()');
+        this.on_create_connection(json);
     }
 
     on_create_connection(config) {
@@ -83,6 +83,15 @@ class RealTimeVideoClient
         });
 
         this.do_negotiate();
+    }
+
+    on_track(event) {
+        this.print_debug('on_track()');
+        if (event.track.kind == 'video') {
+            this.video_object.srcObject = event.streams[0];
+        } else if (event.track.kind == 'audio') {
+            this.audio_object.srcObject = event.streams[0];
+        }
     }
 
     do_negotiate() {
@@ -99,60 +108,92 @@ class RealTimeVideoClient
                 return self.pc.setLocalDescription(offer);
             })
             .then(function() {
-                // Wait for ICE gathering to complete.
-                return new Promise(function(resolve) {
-                    if (self.pc.iceGatheringState === 'complete') {
-                        resolve();
-                    } else {
-                        function check_state() {
-                            if (self.pc.iceGatheringState === 'complete') {
-                                self.pc.removeEventListener('icegatheringstatechange', check_state);
-                                resolve();
-                            }
+                self.on_set_local_description();
+            })
+            .catch(function(error) {
+                self.on_negotiate_error(error);
+            });
+    }
+
+    on_negotiate_error(error) {
+        this.print_error('on_negotiate_error()', error);
+    }
+
+    on_set_local_description() {
+        this.print_debug('on_set_local_description()');
+
+        self = this;
+        // Wait for ICE gathering to complete.
+        return new Promise(function(resolve) {
+                if (self.pc.iceGatheringState === 'complete') {
+                    resolve();
+                } else {
+                    function check_state() {
+                        if (self.pc.iceGatheringState === 'complete') {
+                            self.pc.removeEventListener('icegatheringstatechange', check_state);
+                            resolve();
                         }
-                        self.pc.addEventListener('icegatheringstatechange', check_state);
                     }
-                });
+                    self.pc.addEventListener('icegatheringstatechange', check_state);
+                }
             })
             .then(function() {
-                var offer = self.pc.localDescription;
-                return fetch('/offer', {
-                    body: JSON.stringify({
-                        sdp: offer.sdp,
-                        type: offer.type,
-                    }),
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    method: 'POST'
-                });
+                self.on_ice_gathering_state_change_complete();
+            })
+            .catch(function(error) {
+                self.on_set_local_description_error(error);
+            });
+    }
+
+    on_set_local_description_error(error) {
+        this.print_error('on_set_local_description_error()', error);
+    }
+
+    on_ice_gathering_state_change_complete() {
+        this.print_debug('on_ice_gathering_state_change_complete()');
+        this.post_offer()
+    }
+
+    post_offer() {
+        let offer = this.pc.localDescription;
+        self = this;
+        return fetch('/offer', {
+                body: JSON.stringify({
+                    sdp: offer.sdp,
+                    type: offer.type,
+                }),
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                method: 'POST'
             })
             .then(function(response) {
                 return response.json();
             })
             .then(function(answer) {
-                return self.pc.setRemoteDescription(answer);
+                self.on_offer_ok(answer);
             })
-            .catch(function(e) {
-                alert(e);
+            .catch(function(error) {
+                self.on_offer_error(error);
             });
     }
 
-    on_track(event) {
-        this.print_debug('on_track()');
-        if (event.track.kind == 'video') {
-            this.video_object.srcObject = event.streams[0];
-        } else if (event.track.kind == 'audio') {
-            this.audio_object.srcObject = event.streams[0];
-        }
+    on_offer_error(error) {
+        this.print_error('on_offer_error()', error);
+    }
+
+    on_offer_ok(answer_json) {
+        this.print_debug('on_offer_ok()');
+        return this.pc.setRemoteDescription(answer_json);
     }
 }
 
-var default_video_client = new RealTimeVideoClient('client', 'rtc-realtime-video')
+var default_video_client = null;
 window.addEventListener('load', function(event) {
+    default_video_client = new RealTimeVideoClient('client', 'rtc-realtime-video');
     default_video_client.start();
 })
-window.addEventListener('unload', function(event) {
+window.addEventListener('beforeunload', function(event) {
     default_video_client.stop();
     default_video_client = null;
 })
