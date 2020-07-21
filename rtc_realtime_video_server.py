@@ -6,6 +6,7 @@ import string
 import random
 import ssl
 import time
+import dataclasses
 import json
 import fractions
 import asyncio
@@ -14,7 +15,7 @@ import numpy as np
 from typing import Tuple
 from queue import Empty
 from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCPeerConnection, RTCSessionDescription, RTCIceServer, RTCConfiguration
 from aiortc.mediastreams import MediaStreamTrack, MediaStreamError
 
 INDEX_HTML_PATH = '/'
@@ -33,15 +34,16 @@ DEFAULT_VIDEO_CLOCK_RATE = 90000
 DEFAULT_VIDEO_FPS = 12
 DEFAULT_FRAME_FORMAT = 'bgr24'
 LOGGING_PREFIX = '[rtc.realtime_video.server] '
+LOGGING_SUFFIX = ''
 
 
 def print_out(message):
-    sys.stdout.write(LOGGING_PREFIX + message)
+    sys.stdout.write(LOGGING_PREFIX + message + LOGGING_SUFFIX)
     sys.stdout.flush()
 
 
 def print_error(message):
-    sys.stderr.write(LOGGING_PREFIX + message)
+    sys.stderr.write(LOGGING_PREFIX + message + LOGGING_SUFFIX)
     sys.stderr.flush()
 
 
@@ -53,49 +55,57 @@ def generate_exit_password():
     return ''.join(random.choices(string.ascii_letters + string.digits, k=PASSWORD_LENGTH))
 
 
-def is_stun(text: str):
-    return text[:5] == 'turn:'
-
-
-def is_turn(text: str):
+def _is_stun(text: str):
     return text[:5] == 'stun:'
 
 
-def ice_to_dict(ice: str):
+def _is_turn(text: str):
+    return text[:5] == 'turn:'
+
+
+def ice_url_to_ice_server(ice_url: str):
     """
-    ``turn:admin:1234@localhost:3478`` -> ``{ urls: ['turn:localhost:3478'], username: 'admin', credential: '1234'}``
+    Example:
+    ``turn:admin:1234@localhost:3478`` convert to:
+     - urls: 'turn:localhost:3478'
+     - username: 'admin'
+     - credential: '1234'
     """
 
-    at_index = ice.find('@')
+    at_index = ice_url.find('@')
     if at_index == -1:
-        return {'urls': [ice]}
+        return RTCIceServer(urls=ice_url)
 
-    if is_stun(ice):
-        schema = 'stun:'
-    elif is_turn(ice):
-        schema = 'turn:'
-    else:
-        return None  # For filtering ...
+    if _is_turn(ice_url):
+        username, credential = ice_url[5:at_index].split(':')
+        address = 'turn:' + ice_url[at_index+1]
+        return RTCIceServer(urls=address, username=username, credential=credential)
 
-    username, credential = ice[5:at_index].split(':')
-    address = ice[at_index+1]
-    return {'urls': [schema+address], 'username': username, 'credential': credential}
+    return None  # For filtering ...
 
 
-def get_rtc_configuration_dict(ices: list):
+def ice_urls_to_servers(ice_urls: list):
+    return list(filter(lambda x: x, [ice_url_to_ice_server(i) for i in ice_urls]))
+
+
+def ice_urls_to_configuration(ice_urls: list):
+    return RTCConfiguration(ice_urls_to_servers(ice_urls))
+
+
+def ice_configuration_to_dict(config: RTCConfiguration):
     result = {
         'sdpSemantics': 'unified-plan',
         'iceTransportPolicy': 'all',
         'iceCandidatePoolSize': 0
     }
 
-    ice_servers = list(filter(lambda x: x, [ice_to_dict(i) for i in ices]))
-    if ice_servers:
-        result['iceServers'] = ice_servers
-    else:
-        result['iceServers'] = [
-            {'urls': ['stun:stun.l.google.com:19302']}
-        ]
+    ice_servers = []
+    for server in config.iceServers:
+        if _is_stun(server.urls):
+            ice_servers.append({'urls': server.urls})
+        elif _is_turn(server.urls):
+            ice_servers.append(dataclasses.asdict(server))
+    result['iceServers'] = ice_servers
 
     return result
 
@@ -238,7 +248,8 @@ class RealTimeVideoServer:
         else:
             self.ssl_context = None
 
-        self.rtc_config_json = json.dumps(get_rtc_configuration_dict(self.ices))
+        self.rtc_config = ice_urls_to_configuration(self.ices)
+        self.rtc_config_json = json.dumps(ice_configuration_to_dict(self.rtc_config))
 
         self.app = web.Application()
         self.app.on_shutdown.append(self.on_shutdown)
@@ -263,6 +274,8 @@ class RealTimeVideoServer:
         self.peer_connections = set()
 
         print_out(f'RealTimeVideoServer() constructor done')
+        print_out(f'RealTimeVideoServer() ICES: {self.rtc_config}')
+        print_out(f'RealTimeVideoServer() ICE JSON: {self.rtc_config_json}')
 
     async def on_exit_process_background(self):
         print_out(f'RealTimeVideoServer.on_exit_process_background()')
@@ -298,7 +311,7 @@ class RealTimeVideoServer:
         params = await request.json()
         offer = RTCSessionDescription(sdp=params['sdp'], type=params['type'])
 
-        pc = RTCPeerConnection()
+        pc = RTCPeerConnection(self.rtc_config)
         self.peer_connections.add(pc)
 
         @pc.on('iceconnectionstatechange')

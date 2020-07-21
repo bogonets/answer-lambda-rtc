@@ -12,17 +12,18 @@ import rtc_realtime_video_server as vs
 
 
 LOGGING_PREFIX = '[rtc.realtime_video] '
+LOGGING_SUFFIX = ''
 DEFAULT_MAX_QUEUE_SIZE = 4
 UNKNOWN_PID = 0
 
 
 def print_out(message):
-    sys.stdout.write(LOGGING_PREFIX + message)
+    sys.stdout.write(LOGGING_PREFIX + message + LOGGING_SUFFIX)
     sys.stdout.flush()
 
 
 def print_error(message):
-    sys.stderr.write(LOGGING_PREFIX + message)
+    sys.stderr.write(LOGGING_PREFIX + message + LOGGING_SUFFIX)
     sys.stderr.flush()
 
 
@@ -267,7 +268,7 @@ def main():
         '--key-file',
         help='SSL key file (for HTTPS)')
     parser.add_argument(
-        '--source',
+        '--file',
         help='Read the media from a file and sent it.'),
     parser.add_argument(
         '--host',
@@ -279,6 +280,10 @@ def main():
         default=vs.DEFAULT_PORT,
         help=f'Port for HTTP server (default: {vs.DEFAULT_PORT})')
     parser.add_argument(
+        '--ices',
+        default=vs.DEFAULT_ICES[0],
+        help=f'ICE servers (default: {vs.DEFAULT_ICES[0]})')
+    parser.add_argument(
         '--fps',
         type=int,
         default=vs.DEFAULT_VIDEO_FPS,
@@ -289,13 +294,17 @@ def main():
         action='count')
     args = parser.parse_args()
 
-    video = RealTimeVideo(host=args.host, port=args.port, fps=args.fps, frame_format='bgr24',
+    global LOGGING_SUFFIX
+    LOGGING_SUFFIX = '\n'
+    vs.LOGGING_SUFFIX = '\n'
+
+    video = RealTimeVideo(host=args.host, port=args.port, ices=[args.ices], fps=args.fps, frame_format='bgr24',
                           cert_file=args.cert_file, key_file=args.key_file, verbose=bool(args.verbose))
     video.on_init()
 
     import cv2
     import time
-    cap = cv2.VideoCapture(args.source)
+    cap = cv2.VideoCapture(args.file)
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
