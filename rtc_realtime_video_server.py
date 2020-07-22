@@ -184,7 +184,7 @@ class VideoImageTrack(MediaStreamTrack):
         # The unit of time (in fractional seconds) in which timestamps are expressed.
         self.video_time_base = fractions.Fraction(1, self.video_clock_rate)
         self.verbose = verbose
-        print_out(f'VideoImageTrack(fps={fps},frame_format={frame_format},verbose={verbose}')
+        print_out(f'VideoImageTrack(fps={fps},frame_format={frame_format},verbose={verbose})')
 
     async def next_timestamp(self) -> Tuple[int, fractions.Fraction]:
         if self.readyState != 'live':
@@ -274,8 +274,9 @@ class RealTimeVideoServer:
         self.peer_connections = set()
 
         print_out(f'RealTimeVideoServer() constructor done')
-        print_out(f'RealTimeVideoServer() ICES: {self.rtc_config}')
-        print_out(f'RealTimeVideoServer() ICE JSON: {self.rtc_config_json}')
+        if verbose:
+            print_out(f' - ICES: {self.rtc_config}')
+            print_out(f' - ICE JSON: {self.rtc_config_json}')
 
     async def on_exit_process_background(self):
         print_out(f'RealTimeVideoServer.on_exit_process_background()')
@@ -332,6 +333,9 @@ class RealTimeVideoServer:
         #     else:
         #         player = MediaPlayer('/dev/video0', format='v4l2', options=options)
 
+        if self.verbose:
+            print_out(f'- OFFER: {offer}')
+
         await pc.setRemoteDescription(offer)
 
         for t in pc.getTransceivers():
@@ -344,6 +348,10 @@ class RealTimeVideoServer:
                 pass
 
         answer = await pc.createAnswer()
+
+        if self.verbose:
+            print_out(f'- ANSWER: {answer}')
+
         await pc.setLocalDescription(answer)
 
         return web.Response(
