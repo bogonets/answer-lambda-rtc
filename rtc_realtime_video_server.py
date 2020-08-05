@@ -146,23 +146,17 @@ class Singleton:
 
 class FrameQueue(Singleton):
 
-    def __init__(self, queue, frame_format=DEFAULT_FRAME_FORMAT):
+    def __init__(self, queue):
         self.EMPTY_IMAGE = np.zeros((300, 300, 3), dtype=np.uint8)
         self.queue = queue
-        self.frame_format = frame_format
         self.last_image = self.EMPTY_IMAGE
-        self.last_frame = av.VideoFrame.from_ndarray(self.EMPTY_IMAGE, format=frame_format)
-
-    def update(self, image):
-        self.last_image = image
-        self.last_frame = av.VideoFrame.from_ndarray(self.last_image, format=self.frame_format)
 
     def pop(self):
         try:
-            self.update(self.queue.get_nowait())
+            self.last_image = self.queue.get_nowait()
         except Empty:
             pass
-        return self.last_frame
+        return self.last_image
 
 
 class VideoImageTrack(MediaStreamTrack):
@@ -177,7 +171,8 @@ class VideoImageTrack(MediaStreamTrack):
 
     def __init__(self, queue, fps=DEFAULT_VIDEO_FPS, frame_format=DEFAULT_FRAME_FORMAT, verbose=False):
         super().__init__()  # don't forget this!
-        self.queue = FrameQueue.instance(queue, frame_format)
+        self.queue = FrameQueue.instance(queue)
+        self.frame_format = frame_format
         self.fps = fps
         self.ptime = 1.0 / float(fps)
         self.video_clock_rate = DEFAULT_VIDEO_CLOCK_RATE
@@ -201,7 +196,8 @@ class VideoImageTrack(MediaStreamTrack):
 
     async def recv(self):
         pts, time_base = await self.next_timestamp()
-        frame = self.queue.pop()
+        image = self.queue.pop()
+        frame = av.VideoFrame.from_ndarray(image, format=self.frame_format)
         frame.pts = pts
         frame.time_base = time_base
         if self.verbose:
