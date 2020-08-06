@@ -4,6 +4,7 @@ import sys
 import time
 import argparse
 import psutil
+import numpy as np
 
 from multiprocessing import Process, Queue
 from queue import Full, Empty
@@ -28,6 +29,14 @@ def print_error(message):
 
 
 class CreateProcessError(Exception):
+    pass
+
+
+class NullDataException(TypeError):
+    pass
+
+
+class EmptyDataException(ValueError):
     pass
 
 
@@ -79,7 +88,7 @@ class RealTimeVideo:
         elif key == 'frame_format':
             self.frame_format = val
         elif key == 'verbose':
-            self.verbose = bool(val)
+            self.verbose = val.lower() in ['y', 'yes', 'true']
 
     def on_get(self, key):
         if key == 'host':
@@ -127,7 +136,7 @@ class RealTimeVideo:
                                args=(self.queue, self.exit_password, self.exit_timeout_seconds,
                                      self.ices, self.host, self.port,
                                      self.fps, self.frame_format,
-                                     self.cert_file, self.key_file, self.verbose))
+                                     self.cert_file, self.key_file, self.verbose,))
         self.process.start()
         if self.process.is_alive():
             self.pid = self.process.pid
@@ -225,6 +234,12 @@ class RealTimeVideo:
     def on_run(self, image):
         if self.is_reopen():
             self.reopen()
+
+        if image is None:
+            raise NullDataException
+        assert isinstance(image, np.ndarray)
+        if image.size <= 0:
+            raise EmptyDataException
 
         self.push(image)
 
