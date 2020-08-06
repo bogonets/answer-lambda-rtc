@@ -16,7 +16,7 @@
             {"type": "pip", "src": "aiortc"},
             {"type": "pip", "src": "psutil"}
         ],
-        "engines": ">=1.1.3",
+        "engines": ">=1.1.4",
         "environment": {
             "type": "pyenv",
             "name": "rtc"
