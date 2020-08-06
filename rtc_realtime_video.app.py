@@ -151,10 +151,10 @@ class RealTimeVideo:
                 request_begin = time.time()
                 print_out(f'RealTimeVideo._close_process_impl() RequestExit(timeout={timeout}s)')
                 request_result = vs.request_exit(self.host, self.port, self.exit_password, timeout)
-                timeout = timeout - (time.time() - request_begin)
-                timeout = timeout if timeout >= 0.0 else 0.0
                 if not request_result:
                     print_error(f'RealTimeVideo._close_process_impl() Exit request failure.')
+                timeout = timeout - (time.time() - request_begin)
+                timeout = timeout if timeout >= 0.0 else 0.0
 
             print_out(f'RealTimeVideo._close_process_impl() Join(timeout={timeout}s) the RTC process.')
             self.process.join(timeout=timeout)
