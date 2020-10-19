@@ -58,7 +58,7 @@
         {
             "rule": "initialize_only",
             "name": "port",
-            "default_value": 8080,
+            "default_value": 9999,
             "type": "int",
             "required": true,
             "valid": {},
@@ -74,7 +74,7 @@
         {
             "rule": "initialize_only",
             "name": "max_queue_size",
-            "default_value": 4,
+            "default_value": 2,
             "type": "int",
             "required": true,
             "valid": {},
