@@ -1,7 +1,7 @@
 {
     "info": {
         "name": "rtc_realtime_video",
-        "version": "1.1.5",
+        "version": "1.1.6",
         "category": "rtc",
         "keywords": ["rtc"],
         "homepage": "https://github.com/bogonets/answer-lambda-rtc",

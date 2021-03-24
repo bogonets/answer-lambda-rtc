@@ -78,7 +78,7 @@ def ice_url_to_ice_server(ice_url: str):
 
     if _is_turn(ice_url):
         username, credential = ice_url[5:at_index].split(':')
-        address = 'turn:' + ice_url[at_index+1]
+        address = 'turn:' + ice_url[at_index+1+len(ice_url)]
         return RTCIceServer(urls=address, username=username, credential=credential)
 
     return None  # For filtering ...
